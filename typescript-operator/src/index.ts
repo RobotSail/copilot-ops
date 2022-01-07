@@ -3,11 +3,7 @@ import * as k8s from "@kubernetes/client-node";
 import * as fs from "fs";
 import axios from "axios";
 import { Completion } from "./types";
-import { OPENAI_API_KEY } from "./constants";
-
-const COMPLETION_GROUP = "copilot.poc.com";
-const COMPLETION_VERSION = "v1";
-const COMPLETION_PLURAL = "completions";
+import { OPENAI_API_KEY, COMPLETION_GROUP, COMPLETION_PLURAL, COMPLETION_VERSION } from "./constants";
 
 const kc = new k8s.KubeConfig();
 kc.loadFromDefault();
