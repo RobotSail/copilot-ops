@@ -1,16 +1,20 @@
-import KubernetesObject from "@dot-i/k8s-operator";
+import * as k8s from "@kubernetes/client-node";
 
-export interface CompletionResource extends KubernetesObject {
-  metadata: any;
-  spec: CompletionSpec;
-  status: CompletionStatus;
-}
+export type Completion = {
+  apiVersion: string;
+  kind: string;
+  metadata: k8s.V1ObjectMeta;
+  spec?: CompletionSpec;
+  status?: CompletionStatus;
+};
 
-export interface CompletionSpec {
+export type CompletionSpec = {
   userPrompt: string;
-}
+  maxTokens: number;
+  // temperature: number;
+};
 
-export interface CompletionStatus {
-  observedGeneration?: number;
-  completion?: string;
-}
+export type CompletionStatus = {
+  completion: string;
+  observedGeneration: number;
+};

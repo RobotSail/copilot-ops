@@ -25,6 +25,11 @@ spec:
               completion:
                 type: string
                 description: The completion of the user prompt.
+              observedGeneration:
+                type: integer
+                format: int64
+                description: The generation observed by the operator.
+
   scope: Cluster
   names:
     plural: completions
