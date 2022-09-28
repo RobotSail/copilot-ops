@@ -52,6 +52,7 @@ func RunEdit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("could not create client: %w", err)
 	}
 
+	r.Config.PrintAsJSON()
 	responses, err := client.Edit()
 	if err != nil {
 		return fmt.Errorf("could not edit files: %w", err)
@@ -69,13 +70,13 @@ func RunEdit(cmd *cobra.Command, args []string) error {
 func PrepareEditClient(r *Request, input, instruction string) (ai.EditClient, error) {
 	var client ai.EditClient
 
-	switch r.Backend {
+	switch r.Config.Backend {
 	case ai.GPT3:
-		config := r.Config.OpenAI
+		config := r.Config.GPT3
 		if config == nil {
 			return nil, fmt.Errorf("no openai config provided")
 		}
-		client = gpt3.CreateGPT3EditClient(*r.Config.OpenAI, input, instruction, 1, nil, nil)
+		client = gpt3.CreateGPT3EditClient(*r.Config.GPT3, input, instruction, 1, nil, nil)
 	case ai.GPTJ:
 		return nil, fmt.Errorf("editing is not implemented for gpt-j")
 	case ai.BLOOM:

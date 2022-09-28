@@ -18,10 +18,12 @@ var _ = Describe("Gpt3 Generate Client", func() {
 				APIKey:  "abc",
 				OrgID:   nil,
 				BaseURL: "http://example.com",
+				GenerateParams: gpt3.GenerateParams{
+					Prompt:    "hello world",
+					MaxTokens: 256,
+					N:         1,
+				},
 			},
-			"hello world",
-			256,
-			1,
 		)
 	})
 

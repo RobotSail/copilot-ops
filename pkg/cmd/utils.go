@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/redhat-et/copilot-ops/pkg/ai"
-	"github.com/redhat-et/copilot-ops/pkg/ai/gpt3"
 	"github.com/redhat-et/copilot-ops/pkg/cmd/config"
 	"github.com/redhat-et/copilot-ops/pkg/filemap"
 	"github.com/spf13/cobra"
@@ -16,23 +15,31 @@ import (
 // AI backends.
 // FIXME: consolidate the settings depending on the type of Model. E.g., OpenAI settings should be under their own.
 type Request struct {
-	Config       config.Config
-	Fileset      *config.Filesets
-	Filemap      *filemap.Filemap
-	FilemapText  string
-	UserRequest  string
-	IsWrite      bool
-	OutputType   string
-	OpenAIURL    string
-	NTokens      int32
-	NCompletions int32
-	// Backend Sepecifies which type of AI Backend to use.
-	Backend ai.Backend
+	Config      config.Config
+	Fileset     *config.Filesets
+	Filemap     *filemap.Filemap
+	FilemapText string
+	UserRequest string
+	IsWrite     bool
+	OutputType  string
 }
 
-// PrepareRequest Processes the user input along with provided environment variables,
-// creating a Request object which is used for context in further requests.
-func PrepareRequest(cmd *cobra.Command) (*Request, error) {
+// Flags Defines all of the values extracted from the commandline.
+type Flags struct {
+	Request      string
+	Write        bool
+	Path         string
+	Files        []string
+	Filesets     []string
+	NTokens      int32
+	NCompletions int32
+	OutputType   string
+	AIBackend    string
+}
+
+// ExtractFlags Returns a struct containing all of the flags present in
+// in the provided command.
+func ExtractFlags(cmd *cobra.Command) Flags {
 	request, _ := cmd.Flags().GetString(FlagRequestFull)
 	write, _ := cmd.Flags().GetBool(FlagWriteFull)
 	path, _ := cmd.Flags().GetString(FlagPathFull)
@@ -45,7 +52,6 @@ func PrepareRequest(cmd *cobra.Command) (*Request, error) {
 	nTokens, _ := cmd.Flags().GetInt32(FlagNTokensFull)
 	nCompletions, _ := cmd.Flags().GetInt32(FlagNCompletionsFull)
 	outputType, _ := cmd.Flags().GetString(FlagOutputTypeFull)
-	openAIURL, _ := cmd.Flags().GetString(FlagOpenAIURLFull)
 	aiBackend, _ := cmd.Flags().GetString(FlagAIBackendFull)
 
 	log.Println("flags:")
@@ -57,14 +63,50 @@ func PrepareRequest(cmd *cobra.Command) (*Request, error) {
 	log.Printf(" - %-8s: %v\n", FlagNTokensFull, nTokens)
 	log.Printf(" - %-8s: %v\n", FlagNCompletionsFull, nCompletions)
 	log.Printf(" - %-8s: %v\n", FlagOutputTypeFull, outputType)
+	log.Printf(" - %-8s: %v\n", FlagAIBackendFull, aiBackend)
 
-	log.Printf(" - %-8s: %q\n", FlagOpenAIURLFull, openAIURL)
-	log.Printf(" - %-8s: %q\n", FlagAIBackendFull, aiBackend)
+	return Flags{
+		Request:      request,
+		Write:        write,
+		Path:         path,
+		Files:        files,
+		Filesets:     filesets,
+		NTokens:      nTokens,
+		NCompletions: nCompletions,
+		OutputType:   outputType,
+		AIBackend:    aiBackend,
+	}
+}
 
+// ApplyAIFlags Applies the necessary values from the given flags struct
+// into the provided AI modules.
+func ApplyAIFlags(flags Flags, conf *config.Config) {
+	// FIXME: convert all fields in config to pointers, test for pointer null
+	if flags.NTokens != 0 {
+		switch {
+		case conf.GPT3 != nil:
+			conf.GPT3.GenerateParams.MaxTokens = int(flags.NTokens)
+		case conf.GPTJ != nil:
+			conf.GPTJ.GenerateParams.ResponseLength = flags.NTokens
+		case conf.BLOOM != nil:
+			conf.BLOOM.GenerateParams.MaxNewTokens = int(flags.NTokens)
+		}
+	}
+	if flags.NCompletions != 0 {
+		if conf.GPT3 != nil {
+			conf.GPT3.GenerateParams.N = int(flags.NCompletions)
+		}
+	}
+}
+
+// PrepareRequest Processes the user input along with provided environment variables,
+// creating a Request object which is used for context in further requests.
+func PrepareRequest(cmd *cobra.Command) (*Request, error) {
+	flags := ExtractFlags(cmd)
 	// Handle --path by changing the working directory
 	// so that every file name we refer to is relative to path
-	if path != "" {
-		if err := os.Chdir(path); err != nil {
+	if flags.Path != "" {
+		if err := os.Chdir(flags.Path); err != nil {
 			return nil, err
 		}
 	}
@@ -73,47 +115,34 @@ func PrepareRequest(cmd *cobra.Command) (*Request, error) {
 	// we'll just use the defaults and continue without error.
 	// Errors here might return if the file exists but is invalid.
 	conf := config.Config{}
-	if err := conf.Load(); err != nil {
+	if err := conf.Load(cmd); err != nil {
 		return nil, err
 	}
-	// TODO: generalize overriding default values via CLI
-	conf.SetDefaults()
-	// override OpenAI URL
-	if openAIURL != "" {
-		conf.OpenAI.BaseURL = openAIURL
-	}
+	ApplyAIFlags(flags, &conf)
 
 	// load files
 	fm := filemap.NewFilemap()
-	if err := fm.LoadFiles(files); err != nil {
+	if err := fm.LoadFiles(flags.Files); err != nil {
 		log.Fatalf("error loading files: %s\n", err.Error())
 	}
-	if len(filesets) > 0 {
-		log.Printf("loading filesets: %v\n", filesets)
+	if len(flags.Filesets) > 0 {
+		log.Printf("loading filesets: %v\n", flags.Filesets)
 	}
-	if err := fm.LoadFilesets(filesets, conf, config.ConfigFile); err != nil {
+	if err := fm.LoadFilesets(flags.Filesets, conf, config.ConfigFile); err != nil {
 		log.Fatalf("error loading filesets: %s\n", err.Error())
 	}
 	filemapText := fm.EncodeToInputText()
 
-	// select backend type
-	selectedBackend := ai.Backend(aiBackend)
-	if selectedBackend == "" {
-		selectedBackend = conf.Backend
-	}
+	conf.PrintAsJSON()
 
-	// configure backends
 	// FIXME: create default config methods for these
 	r := Request{
-		Config:       conf,
-		Filemap:      fm,
-		FilemapText:  filemapText,
-		UserRequest:  request,
-		IsWrite:      write,
-		OutputType:   outputType,
-		NTokens:      nTokens,
-		NCompletions: nCompletions,
-		Backend:      selectedBackend,
+		Config:      conf,
+		Filemap:     fm,
+		FilemapText: filemapText,
+		UserRequest: flags.Request,
+		IsWrite:     flags.Write,
+		OutputType:  flags.OutputType,
 	}
 
 	return &r, nil
@@ -166,11 +195,40 @@ func AddRequestFlags(cmd *cobra.Command) {
 	cmd.Flags().StringP(
 		FlagAIBackendFull, FlagAIBackendShort, string(ai.GPT3), "AI Backend to use",
 	)
-
-	cmd.Flags().StringP(
-		FlagOpenAIURLFull,
-		FlagOpenAIURLShort,
-		gpt3.OpenAIURL+gpt3.OpenAIEndpointV1,
-		"OpenAI URL",
-	)
 }
+
+// // applyFlags Applies the appropriate configurations to the given config object
+// // based on the provided flags.
+// func applyFlags(conf *config.Config, flags *pflag.FlagSet) {
+// 	nTokens, _ := flags.GetInt32(FlagNTokensFull)
+// 	nCompletions, _ := flags.GetInt32(FlagNCompletionsFull)
+// 	AIURL, _ := flags.GetString(FlagAIURLFull)
+// 	backendS, _ := flags.GetString(FlagAIBackendFull)
+// 	backend := ai.Backend(backendS)
+// 	if nTokens != 0 {
+// 		switch {
+// 		case conf.GPT3 != nil:
+// 			conf.GPT3.GenerateParams.MaxTokens = int(nTokens)
+// 		case conf.GPTJ != nil:
+// 			conf.GPTJ.GenerateParams.ResponseLength = nTokens
+// 		case conf.BLOOM != nil:
+// 			conf.BLOOM.GenerateParams.MaxNewTokens = int(nTokens)
+// 		}
+// 	}
+// 	if nCompletions != 0 {
+// 		if conf.GPT3 != nil {
+// 			conf.GPT3.GenerateParams.N = int(nCompletions)
+// 		}
+// 	}
+// 	// set flag for selected backend
+// 	if AIURL != "" {
+// 		switch backend {
+// 		case ai.BLOOM:
+// 			conf.BLOOM.URL = AIURL
+// 		case ai.GPT3:
+// 			conf.GPT3.BaseURL = AIURL
+// 		case ai.GPTJ:
+// 			conf.GPTJ.URL = AIURL
+// 		}
+// 	}
+// }

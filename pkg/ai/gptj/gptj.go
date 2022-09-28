@@ -35,6 +35,19 @@ type GenerateParams struct {
 type Config struct {
 	// URL Defines the URL which the HTTP Client will be making requests to.
 	URL string `json:"url" yaml:"url"`
+	// GenerateParameters Define the parameters for each generation.
+	GenerateParams GenerateParams `json:"generateParams" yaml:"generateParams"`
+}
+
+//nolint:gochecknoglobals // default config
+var DefaultConfig = &Config{
+	URL: APIURL,
+	GenerateParams: GenerateParams{
+		Temp:           0.0,
+		ResponseLength: MaxTokensGenerate,
+		TopP:           0.0,
+		RemoveInput:    true,
+	},
 }
 
 // Generate Invokes the generate function to GPT-J. Currently, the endpoint
@@ -74,11 +87,11 @@ func (c gptjClient) Generate() ([]string, error) {
 }
 
 // CreateGPTJGenerateClient Returns a GPT-J client which implements the AI Client interface.
-func CreateGPTJGenerateClient(conf Config, params GenerateParams) ai.GenerateClient {
+func CreateGPTJGenerateClient(conf Config) ai.GenerateClient {
 	c := gptjClient{
 		baseURL:        conf.URL,
 		httpClient:     http.DefaultClient,
-		generateParams: &params,
+		generateParams: &conf.GenerateParams,
 	}
 	return c
 }

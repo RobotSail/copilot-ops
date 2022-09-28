@@ -1,12 +1,16 @@
 package config
 
 import (
+	"encoding/json"
 	"errors"
+	"log"
 
 	"github.com/redhat-et/copilot-ops/pkg/ai"
 	"github.com/redhat-et/copilot-ops/pkg/ai/bloom"
 	"github.com/redhat-et/copilot-ops/pkg/ai/gpt3"
 	"github.com/redhat-et/copilot-ops/pkg/ai/gptj"
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 )
 
@@ -19,12 +23,12 @@ const (
 // Config Defines the struct into which the config-file will be parsed.
 type Config struct {
 	Filesets []Filesets `json:"filesets,omitempty" yaml:"filesets,omitempty"`
-	// OpenAI Defines the settings necessary for the OpenAI GPT-3 backend.
-	// FIXME: rename to GPT-3
-	OpenAI *gpt3.Config `json:"openAI,omitempty" yaml:"openAI,omitempty"`
 	// Backend Defines which AI backend should be used in order to generate completions.
 	// Valid models include: gpt-3, gpt-j, opt, and bloom.
-	Backend ai.Backend `json:"backend"`
+	Backend ai.Backend `json:"backend" yaml:"backend,omitempty"`
+	// GPT3 Defines the settings necessary for the GPT3 GPT-3 backend.
+	// FIXME: rename to GPT-3
+	GPT3 *gpt3.Config `json:"gpt3,omitempty" yaml:"gpt3,omitempty"`
 	// GPTJ Defines the configuration options for using GPT-J.
 	GPTJ *gptj.Config `json:"gptj,omitempty" yaml:"gptj,omitempty"`
 	// BLOOM Defines the configuration for using BLOOM.
@@ -42,33 +46,40 @@ type GPTJ struct {
 	URL string `json:"url,omitempty" yaml:"url,omitempty"`
 }
 
-// Load the config from file if it exists, but if it doesn't exist
+const EnvPrefix = "COPILOT_OPS"
+
 // we'll just use the defaults and continue without error.
 // Errors here might return if the file exists but is invalid.
-func (c *Config) Load() error {
-	// bind to environment variables
-	openAIEnvs := map[string]string{
-		"openai.apikey": "OPENAI_API_KEY",
-		"openai.orgid":  "OPENAI_ORG_ID",
-		"openai.url":    "OPENAI_URL",
-	}
-	for k, v := range openAIEnvs {
-		if err := viper.BindEnv(k, v); err != nil {
-			return err
-		}
-	}
-	viper.SetEnvPrefix("COPILOT_OPS")
+func (c *Config) Load(cmd *cobra.Command) error {
+	viper.SetEnvPrefix(EnvPrefix)
 	viper.AutomaticEnv()
+
+	// set defaults per engine, users can override
+	viper.SetDefault("gpt3", gpt3.DefaultConfig)
+	viper.SetDefault("gptj", gptj.DefaultConfig)
+	viper.SetDefault("bloom", bloom.DefaultConfig)
 
 	// paths to look for the config file in
 	viper.AddConfigPath("/etc")
-	viper.AddConfigPath("$HOME")
+	viper.AddConfigPath("${HOME}")
 	// viper.AddConfigPath("..") // parent? grandparent? grandgrandparent?
 	viper.AddConfigPath(".")
 
 	viper.SetConfigType("yaml")     // REQUIRED if the config file does not have the extension in the name
 	viper.SetConfigName(ConfigName) // name of config file (without extension)
 
+	// bind to environment variables
+	openAIEnvs := map[string]string{
+		"gpt3.apikey": "GPT3_APIKEY",
+		"gpt3.orgid":  "GPT3_ORGID",
+		"gpt3.url":    "GPT3_URL",
+	}
+	for k, v := range openAIEnvs {
+		log.Printf("binding %s to %s\n", k, EnvPrefix+"_"+v)
+		if err := viper.BindEnv(k, EnvPrefix+"_"+v); err != nil {
+			return err
+		}
+	}
 	if err := viper.MergeInConfig(); err != nil {
 		var configFileNotFound viper.ConfigFileNotFoundError
 		if ok := errors.As(err, &configFileNotFound); !ok {
@@ -86,31 +97,17 @@ func (c *Config) Load() error {
 		}
 	}
 
+	bindFlags(cmd, viper.GetViper())
 	if err := viper.Unmarshal(c); err != nil {
 		return err
 	}
-
+	c.PrintAsJSON()
 	return nil
 }
 
-// SetDefaults Sets default values for the given config object.
-func (c *Config) SetDefaults() {
-	if c.OpenAI == nil {
-		c.OpenAI = &gpt3.Config{
-			BaseURL: gpt3.OpenAIURL + gpt3.OpenAIEndpointV1,
-		}
-	}
-	// configure GPT-J
-	if c.GPTJ == nil {
-		c.GPTJ = &gptj.Config{
-			URL: gptj.APIURL,
-		}
-	}
-	if c.BLOOM == nil {
-		c.BLOOM = &bloom.Config{
-			URL: bloom.APIURL,
-		}
-	}
+func (c *Config) PrintAsJSON() {
+	vBytes, _ := json.MarshalIndent(c, "", "  ")
+	log.Printf("config:\n%s\n", vBytes)
 }
 
 // FindFileset Returns a fileset with the matching name,
@@ -122,4 +119,16 @@ func (c *Config) FindFileset(name string) *Filesets {
 		}
 	}
 	return nil
+}
+
+// Bind each cobra flag to its associated viper configuration (config file and environment variable).
+func bindFlags(cmd *cobra.Command, v *viper.Viper) {
+	cmd.Flags().VisitAll(func(f *pflag.Flag) {
+		log.Println("visiting ", f.Name)
+		if f.Changed && !v.IsSet(f.Name) {
+			val, _ := cmd.Flags().GetString(f.Name)
+			v.Set(f.Name, val)
+			log.Printf("setting '%s' to '%s'", f.Name, val)
+		}
+	})
 }

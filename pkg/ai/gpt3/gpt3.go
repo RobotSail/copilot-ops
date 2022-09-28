@@ -20,13 +20,8 @@ const (
 	CompletionEndOfSequence string = "EOF"
 )
 
-type GenerateParams struct {
-	Params gogpt.CompletionRequest
-}
-
-type EditParams struct {
-	Params gogpt.EditsRequest
-}
+type GenerateParams = gogpt.CompletionRequest
+type EditParams = gogpt.EditsRequest
 
 // gpt3Client Is a wrapper struct around the go-gpt3
 // package.
@@ -45,6 +40,46 @@ type Config struct {
 	OrgID *string `json:"orgID,omitempty" yaml:"orgID,omitempty"`
 	// BaseURL Defines where the client will reach out to contact the API.
 	BaseURL string `json:"url" yaml:"url"`
+	// GenerateParams Define the parameters for each generate request.
+	GenerateParams GenerateParams `json:"generateParams" yaml:"generateParams"`
+	// EditParams Define the parameters for each edit request.
+	EditParams EditParams `json:"editParams" yaml:"editParams"`
+}
+
+const DefaultMaxTokens = 256
+
+// DefaultConfig Defines the default configuration for GPT-3.
+//nolint:gochecknoglobals // default config
+var DefaultConfig = &Config{
+	BaseURL: OpenAIURL + OpenAIEndpointV1,
+	GenerateParams: GenerateParams{
+		// nothing for now?
+		Model:       OpenAICodeDavinciV2,
+		MaxTokens:   DefaultMaxTokens,
+		Temperature: 0.0,
+		N:           1,
+		Stream:      false,
+		Echo:        false,
+		Stop:        []string{CompletionEndOfSequence},
+		LogProbs:    0,
+		User:        "copilot-ops",
+	},
+	EditParams: defaultEditParams(),
+}
+
+// defaultEditParams Returns the default edit parameters for the GPT-3
+// edits endpoint. This is done as a function because the Model field
+// is typed as a string pointer.
+func defaultEditParams() EditParams {
+	editModels := OpenAICodeDavinciEditV1
+	return EditParams{
+		Model:       &editModels,
+		Input:       "",
+		Instruction: "",
+		N:           1,
+		Temperature: 0.0,
+		TopP:        0.0,
+	}
 }
 
 // Generate Reaches out to the OpenAI GPT-3 Completions API and returns
@@ -87,22 +122,13 @@ func (c gpt3Client) Edit() ([]string, error) {
 
 // CreateGPT3GenerateClient Returns a GPT-3 client which accesses OpenAI's
 // GPT-3 endpoint to generate completions.
-func CreateGPT3GenerateClient(conf Config, prompt string, maxTokens, nCompletions int) ai.GenerateClient {
+func CreateGPT3GenerateClient(conf Config) ai.GenerateClient {
 	// create a GPT-3 Client
 	client := createGPT3Client(conf)
-	// create params for getting a completion
-	params := &gogpt.CompletionRequest{
-		Model:       OpenAICodeDavinciV2,
-		Prompt:      prompt,
-		MaxTokens:   maxTokens,
-		N:           nCompletions,
-		Temperature: 0.0,
-		Stop:        []string{CompletionEndOfSequence},
-	}
 
 	return gpt3Client{
 		client:           *client,
-		completionParams: params,
+		completionParams: &conf.GenerateParams,
 	}
 }
 

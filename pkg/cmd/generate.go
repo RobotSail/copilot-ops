@@ -48,12 +48,12 @@ func NewGenerateCmd() *cobra.Command {
 	)
 
 	cmd.Flags().Int32P(
-		FlagNTokensFull, FlagNTokensShort, DefaultTokens,
+		FlagNTokensFull, FlagNTokensShort, gpt3.DefaultMaxTokens,
 		"Max number of tokens to generate",
 	)
 
 	cmd.Flags().Int32P(
-		FlagNCompletionsFull, FlagNCompletionsShort, DefaultCompletions,
+		FlagNCompletionsFull, FlagNCompletionsShort, 1,
 		"Number of completions to generate",
 	)
 
@@ -71,6 +71,8 @@ func RunGenerate(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("could not create client: %w", err)
 	}
+	// print out current config
+	r.Config.PrintAsJSON()
 	choices, err := client.Generate()
 	if err != nil {
 		return fmt.Errorf("could not generate files: %w", err)
@@ -103,50 +105,37 @@ func RunGenerate(cmd *cobra.Command, args []string) error {
 // selected by the user.
 func PrepareGenerateClient(r *Request, prompt string) (ai.GenerateClient, error) {
 	var client ai.GenerateClient
-	switch r.Backend {
+	switch r.Config.Backend {
 	case ai.GPT3:
-		if r.Config.OpenAI == nil {
+		if r.Config.GPT3 == nil {
 			return nil, fmt.Errorf("no config provided for gpt-3")
 		}
-		client = gpt3.CreateGPT3GenerateClient(
-			*r.Config.OpenAI,
-			prompt,
-			int(r.NTokens),
-			int(r.NCompletions),
-		)
+		conf := *r.Config.GPT3
+		conf.GenerateParams.Prompt = prompt
+		// conf.GenerateParams.MaxTokens = int(r.NTokens)
+		// conf.GenerateParams.N = int(r.NCompletions)
+		client = gpt3.CreateGPT3GenerateClient(conf)
 	case ai.GPTJ:
 		// FIXME: have the config load defaults
 		if r.Config.GPTJ == nil {
 			return nil, fmt.Errorf("no config provided for gpt-j")
 		}
-		client = gptj.CreateGPTJGenerateClient(
-			*r.Config.GPTJ,
-			gptj.GenerateParams{
-				Context:        prompt,
-				Temp:           0.0,
-				ResponseLength: gptj.MaxTokensGenerate,
-				RemoveInput:    true,
-			},
-		)
+		conf := *r.Config.GPTJ
+		conf.GenerateParams.Context = prompt
+		conf.GenerateParams.RemoveInput = true
+		// conf.GenerateParams.Temp = 0.0
+		// conf.GenerateParams.ResponseLength = gptj.MaxTokensGenerate
+		client = gptj.CreateGPTJGenerateClient(conf)
 	case ai.BLOOM:
 		if r.Config.BLOOM == nil {
 			return nil, fmt.Errorf("no config provided for bloom")
 		}
-		//nolint:gosec,gomnd // this random number hardly matters
-		randomSeed := rand.Int() % 100
-		client = bloom.CreateBloomGenerateClient(
-			*r.Config.BLOOM,
-			prompt,
-			bloom.GenerateParameters{
-				Seed:          randomSeed,
-				EarlyStopping: false,
-				MaxNewTokens:  bloom.DefaultTokenSize,
-				// sampling reduces accuracy
-				DoSample: false,
-				//nolint:gomnd // this is the default
-				TopP: 0.9,
-			},
-		)
+		conf := *r.Config.BLOOM
+		if conf.GenerateParams.Seed == 0 {
+			//nolint:gosec,gomnd // this random number hardly matters
+			conf.GenerateParams.Seed = rand.Int()%100 + 1
+		}
+		client = bloom.CreateBloomGenerateClient(conf, prompt)
 	case ai.OPT:
 		return nil, fmt.Errorf("opt does not implement the generate client")
 	case ai.Unselected:

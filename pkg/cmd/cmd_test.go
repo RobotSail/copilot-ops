@@ -1,6 +1,8 @@
 package cmd_test
 
 import (
+	"os"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -16,5 +18,8 @@ var _ = Describe("Root command", func() {
 	})
 	Describe("Edit command", func() {
 		// FIXME: implement this
+	})
+	AfterEach(func() {
+		os.Clearenv()
 	})
 })

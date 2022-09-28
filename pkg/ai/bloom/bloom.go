@@ -15,16 +15,32 @@ const (
 	APIURL = "https://api-inference.huggingface.co/models/bigscience/bloom"
 	// DefaultTokenSize Defines the default amount of max tokens set by BLOOM.
 	DefaultTokenSize = 100
+	DefaultTopP      = 0.9
 )
 
 // Config Defines the values required for successful connections to BLOOM 176B.
 type Config struct {
 	// URL Defines where to find the API.
 	URL string `json:"url" yaml:"url"`
+	// GenerateParams Defines the parameters to use for generation requests.
+	GenerateParams GenerateParams `json:"generateParams" yaml:"generateParams"`
 }
 
-// GenerateParameters Defines a struct which sets the parameters to BLOOM.
-type GenerateParameters struct {
+// DefaultConfig Defines the default configuration for the engine.
+//nolint:gochecknoglobals // default config
+var DefaultConfig = &Config{
+	URL: APIURL,
+	GenerateParams: GenerateParams{
+		// Seed: randomSeed,
+		DoSample:      false,
+		EarlyStopping: false,
+		MaxNewTokens:  DefaultTokenSize,
+		TopP:          DefaultTopP,
+	},
+}
+
+// GenerateParams Defines a struct which sets the parameters to BLOOM.
+type GenerateParams struct {
 	Seed          int     `json:"seed"`
 	EarlyStopping bool    `json:"early_stopping"`
 	LengthPenalty int     `json:"length_penalty"`
@@ -41,8 +57,8 @@ type bloomClient struct {
 
 // generateRequest Defines the body of a request to BLOOM's completions endpoint.
 type generateRequest struct {
-	Inputs     string             `json:"inputs"`
-	Parameters GenerateParameters `json:"parameters"`
+	Inputs     string         `json:"inputs"`
+	Parameters GenerateParams `json:"parameters"`
 }
 
 // choice Represents a single text-generation element.
@@ -118,10 +134,10 @@ func (c bloomClient) Edit() ([]string, error) {
 }
 
 // CreateBloomGenerateClient Returns a client which represents a request made to the OpenAI API.
-func CreateBloomGenerateClient(conf Config, prompt string, params GenerateParameters) ai.GenerateClient {
+func CreateBloomGenerateClient(conf Config, prompt string) ai.GenerateClient {
 	genParams := &generateRequest{
 		Inputs:     prompt,
-		Parameters: params,
+		Parameters: conf.GenerateParams,
 	}
 	return bloomClient{
 		BaseURL:        conf.URL,
